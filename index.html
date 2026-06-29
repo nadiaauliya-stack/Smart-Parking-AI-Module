@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Parking AI</title>
+<style>
+  :root{
+    --bg:#0b0f17; --panel:#121826; --border:#23304a; --text:#e7ecf5;
+    --muted:#7e8aa3; --green:#34d399; --red:#fb7185; --blue:#60a5fa;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:'Segoe UI',system-ui,sans-serif;
+    background:radial-gradient(circle at top,#101826,var(--bg));
+    color:var(--text); min-height:100vh; padding:24px;
+  }
+  .wrap{max-width:880px;margin:0 auto;}
+  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px;}
+  h1{font-size:22px;margin:0;}
+  h1 span{color:var(--blue);}
+  .btn{
+    background:var(--blue); color:#0b0f17; border:none; padding:10px 18px;
+    border-radius:10px; font-weight:600; cursor:pointer; font-size:14px;
+    transition:.2s;
+  }
+  .btn:hover{opacity:.85;}
+  .btn.disconnect{background:var(--red);}
+  .status-pill{
+    display:inline-flex; align-items:center; gap:6px; font-size:13px;
+    padding:6px 12px; border-radius:20px; background:var(--panel); border:1px solid var(--border);
+  }
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);}
+  .dot.on{background:var(--green); box-shadow:0 0 8px var(--green);}
+  .grid{display:grid; grid-template-columns:1.1fr 1fr; gap:18px;}
+  @media(max-width:720px){.grid{grid-template-columns:1fr;}}
+  .card{
+    background:var(--panel); border:1px solid var(--border); border-radius:16px;
+    padding:22px;
+  }
+  .card h2{margin:0 0 16px; font-size:15px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em;}
+  .slot-display{display:flex; flex-direction:column; align-items:center; gap:10px; padding:20px 0;}
+  .slot-icon{font-size:64px;}
+  .slot-text{font-size:26px; font-weight:700;}
+  .slot-text.available{color:var(--green);}
+  .slot-text.full{color:var(--red);}
+  .stats{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:18px;}
+  .stat{background:#0d1320; border:1px solid var(--border); border-radius:12px; padding:14px; text-align:center;}
+  .stat .num{font-size:24px; font-weight:700;}
+  .stat .label{font-size:12px; color:var(--muted); margin-top:4px;}
+  .log{
+    background:#0d1320; border:1px solid var(--border); border-radius:12px; padding:14px;
+    height:260px; overflow-y:auto; font-family:'Consolas',monospace; font-size:13px;
+  }
+  .log div{padding:4px 0; border-bottom:1px solid #1a2336; color:var(--muted);}
+  .log div .t{color:var(--blue); margin-right:8px;}
+  .log div.event{color:var(--text);}
+  footer{margin-top:24px; text-align:center; color:var(--muted); font-size:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>🚗 Smart Parking <span>AI</span></h1>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <div class="status-pill"><span class="dot" id="bleDot"></span><span id="bleStatus">Belum terhubung</span></div>
+      <button class="btn" id="connectBtn">Connect micro:bit</button>
+    </div>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Status Slot Parkir</h2>
+      <div class="slot-display">
+        <div class="slot-icon" id="slotIcon">🅿️</div>
+        <div class="slot-text available" id="slotText">MENUNGGU DATA...</div>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="num" id="totalMasuk">0</div><div class="label">Total Mobil Masuk</div></div>
+        <div class="stat"><div class="num" id="totalKeluar">0</div><div class="label">Total Mobil Keluar</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Log Aktivitas Realtime</h2>
+      <div class="log" id="logBox">
+        <div>Menunggu koneksi micro:bit dan data Firebase...</div>
+      </div>
+    </div>
+  </div>
+
+  <footer>Smart Parking AI · micro:bit BLE UART + Firebase Realtime DB</footer>
+</div>
+
+<!-- Firebase SDK -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getDatabase, ref, set, push, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+// =====================================================================
+// GANTI dengan konfigurasi Firebase project kamu sendiri
+// (Firebase Console -> Project Settings -> General -> Your apps -> SDK config)
+// =====================================================================
+const firebaseConfig = {
+  apiKey: "GANTI_API_KEY",
+  authDomain: "GANTI.firebaseapp.com",
+  databaseURL: "https://GANTI-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "GANTI_PROJECT_ID",
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+// ---------- UI Elements ----------
+const connectBtn = document.getElementById("connectBtn");
+const bleDot = document.getElementById("bleDot");
+const bleStatus = document.getElementById("bleStatus");
+const slotIcon = document.getElementById("slotIcon");
+const slotText = document.getElementById("slotText");
+const totalMasukEl = document.getElementById("totalMasuk");
+const totalKeluarEl = document.getElementById("totalKeluar");
+const logBox = document.getElementById("logBox");
+
+function addLog(text, isEvent=false){
+  const div = document.createElement("div");
+  if(isEvent) div.classList.add("event");
+  const t = document.createElement("span");
+  t.className = "t";
+  t.textContent = new Date().toLocaleTimeString();
+  div.appendChild(t);
+  div.appendChild(document.createTextNode(text));
+  logBox.prepend(div);
+}
+
+// ---------- Web Bluetooth UART (micro:bit MakeCode) ----------
+const UART_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const UART_TX_CHAR_UUID  = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // write (web -> microbit)
+const UART_RX_CHAR_UUID  = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // notify (microbit -> web)
+
+let bleDevice, rxChar;
+let rxBuffer = "";
+
+connectBtn.addEventListener("click", async () => {
+  try {
+    if (!navigator.bluetooth) {
+      alert("Browser ini tidak support Web Bluetooth. Pakai Chrome/Edge di desktop atau Android.");
+      return;
+    }
+    bleDevice = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: "BBC micro:bit" }],
+      optionalServices: [UART_SERVICE_UUID]
+    });
+
+    bleDevice.addEventListener("gattserverdisconnected", onDisconnected);
+
+    const server = await bleDevice.gatt.connect();
+    const service = await server.getPrimaryService(UART_SERVICE_UUID);
+    rxChar = await service.getCharacteristic(UART_RX_CHAR_UUID);
+
+    await rxChar.startNotifications();
+    rxChar.addEventListener("characteristicvaluechanged", handleUartData);
+
+    bleDot.classList.add("on");
+    bleStatus.textContent = "Terhubung: " + bleDevice.name;
+    connectBtn.textContent = "Disconnect";
+    connectBtn.classList.add("disconnect");
+    addLog("✅ Terhubung ke " + bleDevice.name, true);
+
+  } catch (err) {
+    console.error(err);
+    addLog("❌ Gagal connect: " + err.message);
+  }
+});
+
+function onDisconnected(){
+  bleDot.classList.remove("on");
+  bleStatus.textContent = "Terputus";
+  connectBtn.textContent = "Connect micro:bit";
+  connectBtn.classList.remove("disconnect");
+  addLog("⚠️ Koneksi BLE terputus");
+}
+
+// Tombol berfungsi juga sebagai disconnect saat sudah connect
+connectBtn.addEventListener("click", () => {
+  if (bleDevice && bleDevice.gatt.connected && connectBtn.textContent === "Disconnect") {
+    bleDevice.gatt.disconnect();
+  }
+});
+
+function handleUartData(event){
+  const value = new TextDecoder().decode(event.target.value);
+  rxBuffer += value;
+
+  // micro:bit uartWriteLine mengirim diakhiri \n
+  let lines = rxBuffer.split("\n");
+  rxBuffer = lines.pop(); // sisa partial line disimpan lagi
+
+  lines.forEach(line => {
+    line = line.trim();
+    if (!line) return;
+    processLine(line);
+  });
+}
+
+function processLine(line){
+  // format dari micro:bit: "SLOT:FULL" atau "EVENT:MASUK_TERDETEKSI"
+  const [tipe, value] = line.split(":");
+  addLog(`📡 ${line}`, true);
+
+  if (tipe === "SLOT") {
+    updateSlotUI(value);
+    set(ref(db, "parkir/status"), value);
+    set(ref(db, "parkir/lastUpdate"), Date.now());
+  }
+
+  if (tipe === "EVENT") {
+    push(ref(db, "parkir/logs"), { event: value, timestamp: Date.now() });
+
+    if (value === "MASUK_TERDETEKSI") {
+      incrementCounter("masuk");
+    }
+    if (value === "KELUAR_TERDETEKSI") {
+      incrementCounter("keluar");
+    }
+  }
+}
+
+function incrementCounter(jenis){
+  const counterRef = ref(db, `parkir/counter/${jenis}`);
+  onValue(counterRef, (snap) => {
+    const current = snap.val() || 0;
+    set(counterRef, current + 1);
+  }, { onlyOnce: true });
+}
+
+function updateSlotUI(status){
+  if (status === "FULL") {
+    slotIcon.textContent = "🚫";
+    slotText.textContent = "SLOT PENUH";
+    slotText.className = "slot-text full";
+  } else {
+    slotIcon.textContent = "✅";
+    slotText.textContent = "SLOT TERSEDIA";
+    slotText.className = "slot-text available";
+  }
+}
+
+// ---------- Listener Firebase (biar website tetap update walau dibuka di device lain tanpa BLE) ----------
+onValue(ref(db, "parkir/status"), (snap) => {
+  if (snap.exists()) updateSlotUI(snap.val());
+});
+
+onValue(ref(db, "parkir/counter/masuk"), (snap) => {
+  totalMasukEl.textContent = snap.val() || 0;
+});
+
+onValue(ref(db, "parkir/counter/keluar"), (snap) => {
+  totalKeluarEl.textContent = snap.val() || 0;
+});
+
+</script>
+</body>
+</html>
